@@ -1,0 +1,9 @@
+flask
+pandas
+numpy
+keras
+tensorflow
+scikit-learn
+matplotlib
+web3
+ipfshttpclient
