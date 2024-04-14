@@ -41,6 +41,13 @@ contract FederatedLearning {
         updatesSubmitted = 0;
         trainingTaskCompleted = false;
         registrationOpen = false;
+
+        // Clear participantAddresses array
+
+        for (uint i = 0; i < participantAddresses.length; i++) {
+            delete participants[participantAddresses[i]];
+        }
+        delete participantAddresses;
     }
 
     function openRegistration() public onlyTaskPublisher {

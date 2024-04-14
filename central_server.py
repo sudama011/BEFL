@@ -106,7 +106,18 @@ def open_registration():
     tx_hash = contract.functions.openRegistration().transact()
     w3.eth.wait_for_transaction_receipt(tx_hash)
     print('Registration opened for participants')
-    time.sleep(15)
+
+    second = 0
+    while second < 15:
+        participant_enrolled_filter = contract.events.ParticipantEnrolled.create_filter(fromBlock="latest")
+        print('Waiting for participants to enroll')
+        for event in participant_enrolled_filter.get_all_entries():
+            # print(event)
+            if event['event'] == "ParticipantEnrolled":
+                print('Participant enrolled', event['args']['participant'])
+        time.sleep(2)
+        second += 2
+
 
 def close_registration():
     tx_hash = contract.functions.closeRegistration().transact()

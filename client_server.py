@@ -53,9 +53,9 @@ def enroll_participant():
     try:
         tx_hash = contract.functions.enrollParticipant().transact()
         w3.eth.wait_for_transaction_receipt(tx_hash)
-        return 'Participant enrolled'
+        print('Participant enrolled successfully')
     except Exception as e:
-        return f"An error occurred during participant enrollment: {e}"
+        print('Error enrolling participant:', e)
     
 def download_model():
     model_hash = contract.functions.globalModelHash().call()
