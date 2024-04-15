@@ -9,6 +9,7 @@ contract FederatedLearning {
     bool public trainingTaskStarted;
     bool public trainingTaskCompleted;
     bool public registrationOpen;
+    uint public rewardPerUpdate;
 
     struct Participant {
         bool registered;
@@ -30,24 +31,27 @@ contract FederatedLearning {
         taskPublisher = msg.sender;
         trainingTaskCompleted = false;
         registrationOpen = false;
+        
     }
 
     function publishTrainingTask(
         string memory _globalModelHash,
         string memory _modelParameterHash
+        // float _rewardPerUpdate
     ) public onlyTaskPublisher {
         globalModelHash = _globalModelHash;
         modelParameterHash = _modelParameterHash;
         updatesSubmitted = 0;
         trainingTaskCompleted = false;
         registrationOpen = false;
+        // rewardPerUpdate = _rewardPerUpdate;
 
         // Clear participantAddresses array
-
         for (uint i = 0; i < participantAddresses.length; i++) {
             delete participants[participantAddresses[i]];
         }
         delete participantAddresses;
+        participantAddresses = new address[](0);
     }
 
     function openRegistration() public onlyTaskPublisher {
@@ -108,6 +112,7 @@ contract FederatedLearning {
         );
         participants[msg.sender].localModelUpdateHash = _localModelUpdateHash;
         updatesSubmitted++;
+        payable(msg.sender).transfer(rewardPerUpdate);  // Transfer the reward to the participant
         if (updatesSubmitted >= participantAddresses.length) {
             emit AllUpdatesSubmitted();
         }

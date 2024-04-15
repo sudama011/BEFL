@@ -45,9 +45,8 @@ contract = w3.eth.contract(address=contract_address, abi=contract_abi)
 # Connect to IPFS
 client = ipfshttpclient.connect('/dns/127.0.0.1/tcp/5001/http')
 
-df = model_utils.load_data('diabetes.csv')
-X_train, X_test, y_train, y_test = model_utils.preprocess_data(df)
-X_train, X_test = model_utils.standardize_data(X_train, X_test)
+X_train, X_test, y_train, y_test = model_utils.load_data()
+
 
 def enroll_participant():
     try:
@@ -55,25 +54,31 @@ def enroll_participant():
         w3.eth.wait_for_transaction_receipt(tx_hash)
         print('Participant enrolled successfully')
     except Exception as e:
-        print('Error enrolling participant:', e)
+        if isinstance(e.args[1], dict) and 'reason' in e.args[1]:
+            print(e.args[1]['reason'])
+        else:
+            print(e)
+        exit()
     
 def download_model():
     model_hash = contract.functions.globalModelHash().call()
     client.get(model_hash)
     
     # If the target file already exists, delete it
-    if os.path.exists('global_model_downloaded.keras'):
-        os.remove('global_model_downloaded.keras')
+    file_path = 'global_model_downloaded' + str(account_no) + '.keras'
+    if os.path.exists(file_path):
+        os.remove(file_path)
 
-    os.rename(model_hash, 'global_model_downloaded.keras')
-    model = keras.saving.load_model('global_model_downloaded.keras')
+    os.rename(model_hash, file_path)
+    model = keras.saving.load_model(file_path)
     model.compile(optimizer='adam', loss='mean_squared_error')
 
     return model
 
 def upload_local_model_update(model):
-    model.save('local_model.keras')
-    res = client.add('local_model.keras')
+    file_path = 'local_model' + str(account_no) + '.keras'
+    model.save(file_path)
+    res = client.add(file_path)
     model_hash = res['Hash']
     tx_hash = contract.functions.uploadLocalModelUpdate(model_hash).transact()
     w3.eth.wait_for_transaction_receipt(tx_hash)
@@ -97,31 +102,44 @@ def wait_while_training_not_started():
         time.sleep(5)  # Adjust the polling interval as needed
 
 if __name__ == '__main__':
-    enroll_participant()
 
-    wait_while_training_not_started()
+    try:
+        enroll_participant()
 
-    train_model_locally()
+        wait_while_training_not_started()
 
-    current_block = w3.eth.block_number
+        train_model_locally()
 
-    training_task_running = True
-    while training_task_running:
-      global_model_updated_filter = contract.events.GlobalModelUpdated.create_filter(fromBlock=current_block)
-      training_task_completed_filter = contract.events.TrainingTaskCompleted.create_filter(fromBlock=current_block)
-      print('Waiting for updates')
+        current_block = w3.eth.block_number
 
-      for event in global_model_updated_filter.get_all_entries() + training_task_completed_filter.get_all_entries():
-            # print(event)
+        training_task_running = True
+        
+        while training_task_running:
 
-            if(event['event'] == "GlobalModelUpdated"):
-                train_model_locally()
-                print('Model updated')
-                current_block = w3.eth.block_number+1
+            try:
+                global_model_updated_filter = contract.events.GlobalModelUpdated.create_filter(fromBlock=current_block)
+                training_task_completed_filter = contract.events.TrainingTaskCompleted.create_filter(fromBlock=current_block)
+                print('Waiting for updates')
 
-            if(event['event'] == "TrainingTaskCompleted"):
-                print('Training completed')
-                training_task_running = False
-                break
-      time.sleep(5)  # Adjust the polling interval as needed
-      
+                for event in global_model_updated_filter.get_all_entries() + training_task_completed_filter.get_all_entries():
+                    # print(event)
+
+                    if(event['event'] == "GlobalModelUpdated"):
+                        train_model_locally()
+                        print('Model updated')
+                        current_block = w3.eth.block_number+1
+
+                    if(event['event'] == "TrainingTaskCompleted"):
+                        print('Training completed')
+                        training_task_running = False
+                        break
+            except Exception as e:
+                if isinstance(e.args[1], dict) and 'reason' in e.args[1]:
+                    print(e.args[1]['reason'])
+                else:
+                    print(e)
+                exit()
+            time.sleep(5)  # Adjust the polling interval as needed
+    except Exception as e:
+        print(e)
+        exit()    

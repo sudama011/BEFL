@@ -8,10 +8,7 @@ import ipfshttpclient
 import model_utils
 import keras
 from tensorflow import reduce_mean
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
-# Connect to Ethereum node
 w3 = Web3(Web3.HTTPProvider('HTTP://127.0.0.1:7545'))
 
 # Set the default account (replace with the owner's account)
@@ -30,27 +27,20 @@ else:
     print("Contract ABI file not found")
     exit()
 
-# Create contract instance
 contract = w3.eth.contract(address=contract_address, abi=contract_abi)
 
-# Connect to IPFS
 client = ipfshttpclient.connect('/ip4/127.0.0.1/tcp/5001/http')
 
-df = model_utils.load_data('diabetes.csv')
-X_train, X_test, y_train, y_test = model_utils.preprocess_data(df)
-X_train, X_test = model_utils.standardize_data(X_train, X_test)
+X_train, X_test, y_train, y_test = model_utils.load_data()
 
 def aggregate_models(models):
-    # Get the weights from the models
+   
     weights = [model.get_weights() for model in models]
 
-    # Calculate the average of the weights
     average_weights = [reduce_mean([weight[i] for weight in weights], axis=0) for i in range(len(weights[0]))]
 
-    # Create a new model with the same architecture as the original models
     aggregated_model = keras.models.clone_model(models[0])
 
-    # Set the weights of the new model to the average weights
     aggregated_model.set_weights(average_weights)
 
     model_utils.evaluate_model(aggregated_model, X_test, y_test)
@@ -68,8 +58,9 @@ def initiate_task():
     res = client.add('global_model.keras')
     model_hash = res['Hash']
 
+    rewardPerUpdate = 0.1
     # Store the model's CID in the smart contract
-    tx_hash = contract.functions.publishTrainingTask(model_hash, "").transact()
+    tx_hash = contract.functions.publishTrainingTask(model_hash, "" ).transact()
     w3.eth.wait_for_transaction_receipt(tx_hash)
     
     print('Task initiated')
@@ -115,8 +106,8 @@ def open_registration():
             # print(event)
             if event['event'] == "ParticipantEnrolled":
                 print('Participant enrolled', event['args']['participant'])
-        time.sleep(2)
-        second += 2
+        time.sleep(1)
+        second += 1
 
 
 def close_registration():
@@ -135,32 +126,41 @@ def mark_training_complete():
     print('Training task marked as complete')
 
 if __name__ == '__main__':
+    try:
+        initiate_task()
+        open_registration()
+        close_registration()
+        start_training()
 
-    initiate_task()
-    open_registration()
-    close_registration()
-    start_training()
+        epoch = 2
+        current_block = w3.eth.block_number
 
-    epoch = 10
-    current_block = w3.eth.block_number
+        while epoch > 0:
+            try:
+                # print(epoch, 'Waiting for updates')
 
-    while epoch > 0:
-        # print(epoch, 'Waiting for updates')
+                event_filter = contract.events.AllUpdatesSubmitted.create_filter(fromBlock=current_block)
+                for event in event_filter.get_all_entries():
+                    # print(event)
 
-        event_filter = contract.events.AllUpdatesSubmitted.create_filter(fromBlock=current_block)
-        for event in event_filter.get_all_entries():
-            # print(event)
+                    if(event['event']== "AllUpdatesSubmitted"):
+                        print(epoch, 'All updates submitted')
+                        aggregate_updates()
+                        print(epoch, 'Updates aggregated')
+                        epoch -= 1
+                    if epoch == 0:
+                        break
+                    current_block = w3.eth.block_number+1
+            except Exception as e:
+                print(f"Error in training loop: {e}")
+                break
 
-            if(event['event']== "AllUpdatesSubmitted"):
-                print(epoch, 'All updates submitted')
-                aggregate_updates()
-                print(epoch, 'Updates aggregated')
-                epoch -= 1
-                if epoch == 0:
-                    break
-                current_block = w3.eth.block_number+1
-        time.sleep(7)  # Adjust the polling interval as needed
+            time.sleep(6)  # Adjust the polling interval as needed
 
-    mark_training_complete()
-    time.sleep(3)
-    print('Training complete')
+        mark_training_complete()
+        time.sleep(3)
+        print('Training complete')
+    except Exception as e:
+        print(e)
+        print('Error occurred')
+        exit()
