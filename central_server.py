@@ -5,9 +5,9 @@ import os
 from web3 import Web3
 import ipfshttpclient
 
-import model_utils
+import model.model_utils as model_utils
 import keras
-from tensorflow import reduce_mean
+import threading
 
 w3 = Web3(Web3.HTTPProvider('HTTP://127.0.0.1:7545'))
 
@@ -31,34 +31,19 @@ contract = w3.eth.contract(address=contract_address, abi=contract_abi)
 
 client = ipfshttpclient.connect('/ip4/127.0.0.1/tcp/5001/http')
 
-X_train, X_test, y_train, y_test = model_utils.load_data()
+directory = 'server_data'
+X_test, y_test = model_utils.load_data(f"{directory}/local_data.pkl")
 
-def aggregate_models(models):
-   
-    weights = [model.get_weights() for model in models]
-
-    average_weights = [reduce_mean([weight[i] for weight in weights], axis=0) for i in range(len(weights[0]))]
-
-    aggregated_model = keras.models.clone_model(models[0])
-
-    aggregated_model.set_weights(average_weights)
-
-    model_utils.evaluate_model(aggregated_model, X_test, y_test)
-
-    return aggregated_model
 
 def initiate_task():
     print('Initiating task')
     model = model_utils.initialize_model()
-
-    # Save the model to a file
-    model.save('global_model.keras')
-
+    model.save(f'{directory}/global_model.keras')
+   
     # Add the file to IPFS
-    res = client.add('global_model.keras')
+    res = client.add(f'{directory}/global_model.keras')
     model_hash = res['Hash']
 
-    rewardPerUpdate = 0.1
     # Store the model's CID in the smart contract
     tx_hash = contract.functions.publishTrainingTask(model_hash, "" ).transact()
     w3.eth.wait_for_transaction_receipt(tx_hash)
@@ -66,30 +51,25 @@ def initiate_task():
     print('Task initiated')
 
 def aggregate_updates():
-    # Call the aggregateLocalModelUpdates function in the contract
     local_model_update_hashes = contract.functions.aggregateLocalModelUpdates().call()
 
     # Download the local model updates from IPFS
     local_model_updates = []
     for hash in local_model_update_hashes:
-        client.get(hash)
-        if os.path.exists('client_model.keras'):
-            os.remove('client_model.keras')
-        os.rename(hash, 'client_model.keras')
-        model = keras.models.load_model('client_model.keras')
+        client.get(hash, directory)
+        if os.path.exists(f'{directory}/client_model.keras'):
+            os.remove(f'{directory}/client_model.keras')
+        os.rename(f'{directory}/{hash}', f'{directory}/client_model.keras')
+        model = keras.models.load_model(f'{directory}/client_model.keras')
         local_model_updates.append(model)
 
-    # Aggregate the local model updates
-    global_model = aggregate_models(local_model_updates)
+    global_model = model_utils.aggregate_models(local_model_updates)
+    model_utils.evaluate_model(global_model, X_test, y_test)
+    global_model.save(f'{directory}/global_model.keras')
 
-    # Save the global model to a file
-    global_model.save('global_model.keras')
-
-    # Add the file to IPFS
-    res = client.add('global_model.keras')
+    res = client.add(f'{directory}/global_model.keras')
     global_model_hash = res['Hash']
 
-    # Update the global model hash in the contract
     tx_hash = contract.functions.updateGlobalModelHash(global_model_hash).transact()
     w3.eth.wait_for_transaction_receipt(tx_hash)
 
@@ -99,7 +79,7 @@ def open_registration():
     print('Registration opened for participants')
 
     second = 0
-    while second < 15:
+    while second < 20:
         participant_enrolled_filter = contract.events.ParticipantEnrolled.create_filter(fromBlock="latest")
         print('Waiting for participants to enroll')
         for event in participant_enrolled_filter.get_all_entries():
@@ -155,10 +135,9 @@ if __name__ == '__main__':
                 print(f"Error in training loop: {e}")
                 break
 
-            time.sleep(6)  # Adjust the polling interval as needed
+            time.sleep(10)  # Adjust the polling interval as needed
 
         mark_training_complete()
-        time.sleep(3)
         print('Training complete')
     except Exception as e:
         print(e)

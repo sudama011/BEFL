@@ -46,12 +46,17 @@ These instructions will get you a copy of the project up and running on your loc
 
 ## Usage
 
-1. Start the central server:
+1. Spilt and save dataset in the data folder by running the following command:
+    ```bash
+    python model/distribute_mnist_data.py
+    ```
+
+2. Start the central server:
     ```bash
     python central_server.py
     ```
 
-2. Start the participant server in 1 or more terminals:
+3. Start the participant server in 1 or more terminals:
     ```bash
     python client_server.py 1
     python client_server.py 2

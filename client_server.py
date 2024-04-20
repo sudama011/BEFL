@@ -6,21 +6,16 @@ import sys
 from web3 import Web3
 import ipfshttpclient
 
-import model_utils
-import pandas as pd
-# import tensorflow as tf
+import model.model_utils as model_utils
 import keras
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 # Connect to Ethereum node
 w3 = Web3(Web3.HTTPProvider('HTTP://127.0.0.1:7545'))
 
 
-# Set the default account (replace with the participant's account)
+# Set the default account
 account_no = 1
+
 if len(sys.argv) > 1:
   account_no = int(sys.argv[1])
 w3.eth.default_account = w3.eth.accounts[account_no]
@@ -45,7 +40,8 @@ contract = w3.eth.contract(address=contract_address, abi=contract_abi)
 # Connect to IPFS
 client = ipfshttpclient.connect('/dns/127.0.0.1/tcp/5001/http')
 
-X_train, X_test, y_train, y_test = model_utils.load_data()
+directory = f'contributor{account_no}'
+X_train, y_train = model_utils.load_data(f"{directory}/local_data.pkl")
 
 
 def enroll_participant():
@@ -58,25 +54,22 @@ def enroll_participant():
             print(e.args[1]['reason'])
         else:
             print(e)
-        exit()
     
 def download_model():
     model_hash = contract.functions.globalModelHash().call()
-    client.get(model_hash)
-    
-    # If the target file already exists, delete it
-    file_path = 'global_model_downloaded' + str(account_no) + '.keras'
+    file_path = f'{directory}/global_model.keras'
+    client.get(model_hash, directory)
+
     if os.path.exists(file_path):
         os.remove(file_path)
+    os.rename(f'{directory}/{model_hash}', file_path)
 
-    os.rename(model_hash, file_path)
-    model = keras.saving.load_model(file_path)
-    model.compile(optimizer='adam', loss='mean_squared_error')
-
+    model = keras.models.load_model(file_path,compile=False)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     return model
 
 def upload_local_model_update(model):
-    file_path = 'local_model' + str(account_no) + '.keras'
+    file_path = f'{directory}/local_model.keras'
     model.save(file_path)
     res = client.add(file_path)
     model_hash = res['Hash']
@@ -86,8 +79,9 @@ def upload_local_model_update(model):
 
 def train_model_locally():
     model = download_model()
-    model = model_utils.train_model(model,X_train, y_train, epochs=3)
+    model = model_utils.train_model(model,X_train, y_train, epochs=1)
     upload_local_model_update(model)
+    print('Model updated')
 
 
 def wait_while_training_not_started():
@@ -111,7 +105,6 @@ if __name__ == '__main__':
         train_model_locally()
 
         current_block = w3.eth.block_number
-
         training_task_running = True
         
         while training_task_running:
@@ -119,14 +112,12 @@ if __name__ == '__main__':
             try:
                 global_model_updated_filter = contract.events.GlobalModelUpdated.create_filter(fromBlock=current_block)
                 training_task_completed_filter = contract.events.TrainingTaskCompleted.create_filter(fromBlock=current_block)
-                print('Waiting for updates')
 
                 for event in global_model_updated_filter.get_all_entries() + training_task_completed_filter.get_all_entries():
                     # print(event)
 
                     if(event['event'] == "GlobalModelUpdated"):
                         train_model_locally()
-                        print('Model updated')
                         current_block = w3.eth.block_number+1
 
                     if(event['event'] == "TrainingTaskCompleted"):
@@ -139,7 +130,7 @@ if __name__ == '__main__':
                 else:
                     print(e)
                 exit()
-            time.sleep(5)  # Adjust the polling interval as needed
+            time.sleep(8)  # Adjust the polling interval as needed
     except Exception as e:
         print(e)
         exit()    
