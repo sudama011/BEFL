@@ -112,7 +112,7 @@ if __name__ == '__main__':
         close_registration()
         start_training()
 
-        epoch = 2
+        epoch = 5
         current_block = w3.eth.block_number
 
         while epoch > 0:

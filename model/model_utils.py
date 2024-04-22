@@ -1,12 +1,9 @@
 import keras
-from keras.datasets import mnist
-from keras.utils import to_categorical
 from keras import backend as K
 import numpy as np
 from phe import paillier  # Homomorphic Encryption library
-from sklearn.model_selection import train_test_split
-from tensorflow import reduce_mean
 import pickle
+import matplotlib.pyplot as plt
 
 
 def load_data(filepath='local_data1.pkl'):
@@ -44,9 +41,10 @@ def initialize_simple_model():
     model.compile(optimizer='adam', loss='categorical_crossentropy')
     return model
 
-def train_model(model, X_train, y_train, epochs=5):
-    model.fit(X_train, y_train, epochs=epochs)
-    return model
+def train_model(model, X_train, y_train,epochs=5, batch_size=16):
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    history = model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size)
+    return model, history
 
 def encrypt_model_params(model, public_key):
     encrypted_weights = []
@@ -75,19 +73,30 @@ def evaluate_model(model, X_test, y_test):
 
 def aggregate_models(models):
     weights = [model.get_weights() for model in models]
-    average_weights = [reduce_mean([weight[i] for weight in weights], axis=0) for i in range(len(weights[0]))]
+    average_weights = []
+
+    # Compute the mean in smaller batches
+    batch_size = 10  # Adjust this value as needed
+    for i in range(0, len(weights), batch_size):
+        batch_weights = weights[i:i+batch_size]
+        average_batch_weights = [np.mean([weight[j] for weight in batch_weights], axis=0) for j in range(len(batch_weights[0]))]
+        average_weights.append(average_batch_weights)
+
+    # Compute the overall mean
+    average_weights = [np.mean([weight[i] for weight in average_weights], axis=0) for i in range(len(average_weights[0]))]
+
     aggregated_model = keras.models.clone_model(models[0])
     aggregated_model.set_weights(average_weights)
     return aggregated_model
 
 
 if __name__ == '__main__':
-    (X_train, y_train), (X_test, y_test) = mnist.load_data()
+    (X_train, y_train), (X_test, y_test) = keras.datasets.mnist.load_data()
     X_train = X_train.reshape(-1, 28, 28, 1).astype('float32') / 255
     X_test = X_test.reshape(-1, 28, 28, 1).astype('float32') / 255
-    y_train = to_categorical(y_train)
-    y_test = to_categorical(y_test)
-    
+    y_train = keras.utils.to_categorical(y_train, num_classes=10)
+    y_test = keras.utils.to_categorical(y_test, num_classes=10)
+
     label_sets = [
         {1,3,4,7},
         {0,5,6,8},
@@ -96,35 +105,64 @@ if __name__ == '__main__':
         {6,7,8,9}
     ]
 
-    used_indices = set()
+    data_splits = [[] for _ in range(len(label_sets))]
 
-    data_splits = []
-    for i in range(len(label_sets)):
-        # Get the indices of the samples that have labels in the current label set
-        indices = np.isin(np.argmax(y_train, axis=1), list(label_sets[i]))
-        indices = np.array([index for index in np.where(indices)[0] if index not in used_indices])
+    for label in range(10):
+        label_indices = np.where(np.argmax(y_train, axis=-1) == label)[0].astype(int)
+    
+        first_match = True
+        half = len(label_indices) // 2
         
-        # Split the indices into two halves
-        half = len(indices) // 2
-        if i % 2 == 0:
-            indices = indices[:half]
-        else:
-            indices = indices[half:]
-        
-        # Add the used indices to the set of used indices
-        used_indices.update(indices)
+        for i, label_set in enumerate(label_sets):
+            if label in label_set:
+                if first_match:
+                    # first time we match a label in the set, use the first half of the data
+                    X_split, y_split = X_train[label_indices[:half]], y_train[label_indices[:half]]
+                    first_match = False
+                else:
+                    # second time we match a label in the set, use the second half of the data
+                    X_split, y_split = X_train[label_indices[half:]], y_train[label_indices[half:]]
+                data_splits[i].append((X_split, y_split))
 
-        X_split = X_train[indices]
-        y_split = y_train[indices]
-        
-        data_splits.append((X_split, y_split))
+    for i, split in enumerate(data_splits):
+        X_splits, y_splits = zip(*split)
+        X_splits = np.concatenate(X_splits)
+        y_splits = np.concatenate(y_splits)
+        # shuffle the data
+        indices = np.arange(len(X_splits))
+        np.random.shuffle(indices)
+        data_splits[i] = (X_splits[indices], y_splits[indices])
 
-    models = []
-    for X_split, y_split in data_splits:
-        model = initialize_model()
-        m = train_model(model, X_split, y_split)
-        models.append(m)
 
-    aggregated_model = aggregate_models(models)    
-    loss, accuracy = evaluate_model(aggregated_model, X_test, y_test)
-    print(f'Test loss: {loss}, Test accuracy: {accuracy}')
+    global_model = initialize_model()
+    all_histories = [[] for _ in range(len(data_splits))]
+    global_model_history = []
+    no_of_communication_rounds = 3
+    for round in range(no_of_communication_rounds):
+        print(f'Starting round {round+1}...')
+        models = []
+        for i, (X_split, y_split) in enumerate(data_splits):
+            model = keras.models.clone_model(global_model)
+            model.set_weights(global_model.get_weights())
+            m, history = train_model(model, X_split, y_split, epochs=1)
+            models.append(m)
+            all_histories[i].append(history)
+
+        global_model = aggregate_models(models)    
+        loss, accuracy = evaluate_model(global_model, X_test, y_test)
+        global_model_history.append((loss, accuracy))
+
+    # Plot accuracy for each client
+    for i in range(len(data_splits)):
+        client_histories = [h.history['accuracy'] for h in all_histories[i]]
+        plt.plot(client_histories, label=f'Client {i+1}')
+
+    # Plot accuracy for aggregated model
+    global_model_histories = [h[1] for h in global_model_history]
+    plt.plot(global_model_histories, label='Aggregated model')
+    plt.title('Model accuracy')
+    plt.ylabel('Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylim(0, 1)
+    plt.legend()
+    plt.show()
