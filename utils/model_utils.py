@@ -4,11 +4,12 @@ import numpy as np
 from phe import paillier  # Homomorphic Encryption library
 import pickle
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 
 
 def load_data(filepath='local_data1.pkl'):
     with open(filepath, 'rb') as f:
-        X_train, y_train = pickle.load(f)
+        (X_train, y_train) = pickle.load(f)
     return X_train, y_train
 
 def ewc_loss(star_vars, lambd):
@@ -71,12 +72,10 @@ def evaluate_model(model, X_test, y_test):
     loss, accuracy = model.evaluate(X_test, y_test)
     return loss, accuracy
 
-def aggregate_models(models):
+def aggregate_models(models, batch_size=16):
     weights = [model.get_weights() for model in models]
     average_weights = []
 
-    # Compute the mean in smaller batches
-    batch_size = 10  # Adjust this value as needed
     for i in range(0, len(weights), batch_size):
         batch_weights = weights[i:i+batch_size]
         average_batch_weights = [np.mean([weight[j] for weight in batch_weights], axis=0) for j in range(len(batch_weights[0]))]
@@ -134,17 +133,18 @@ if __name__ == '__main__':
         data_splits[i] = (X_splits[indices], y_splits[indices])
 
 
-    global_model = initialize_model()
+    global_model = initialize_simple_model()
+
     all_histories = [[] for _ in range(len(data_splits))]
     global_model_history = []
-    no_of_communication_rounds = 3
+    no_of_communication_rounds = 5
     for round in range(no_of_communication_rounds):
         print(f'Starting round {round+1}...')
         models = []
         for i, (X_split, y_split) in enumerate(data_splits):
             model = keras.models.clone_model(global_model)
             model.set_weights(global_model.get_weights())
-            m, history = train_model(model, X_split, y_split, epochs=1)
+            m, history = train_model(model, X_split, y_split, epochs=1,batch_size=32)
             models.append(m)
             all_histories[i].append(history)
 
@@ -163,6 +163,11 @@ if __name__ == '__main__':
     plt.title('Model accuracy')
     plt.ylabel('Accuracy')
     plt.xlabel('Epoch')
-    plt.ylim(0, 1)
+
+    # Set the x-axis to only display integer values
+    ax = plt.gca()
+    ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+
+    plt.ylim(.77, 1)
     plt.legend()
     plt.show()

@@ -6,7 +6,7 @@ import sys
 from web3 import Web3
 import ipfshttpclient
 
-import model.model_utils as model_utils
+import utils.model_utils as model_utils
 import keras
 
 # Connect to Ethereum node
@@ -64,8 +64,7 @@ def download_model():
         os.remove(file_path)
     os.rename(f'{directory}/{model_hash}', file_path)
 
-    model = keras.models.load_model(file_path,compile=False)
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model = keras.models.load_model(file_path)
     return model
 
 def upload_local_model_update(model):
@@ -79,7 +78,7 @@ def upload_local_model_update(model):
 
 def train_model_locally():
     model = download_model()
-    model = model_utils.train_model(model,X_train, y_train, epochs=1)
+    model,history = model_utils.train_model(model,X_train, y_train, epochs=1)
     upload_local_model_update(model)
     print('Model updated')
 
@@ -89,7 +88,6 @@ def wait_while_training_not_started():
         event_filter = contract.events.TrainingTaskStarted.create_filter(fromBlock=max(0, w3.eth.block_number - 5))
         print('Waiting for training task to start')
         for event in event_filter.get_all_entries():
-            print(event)
             if event['event'] == "TrainingTaskStarted":
                 print('Training task started')
                 return

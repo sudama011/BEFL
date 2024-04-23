@@ -5,9 +5,8 @@ import os
 from web3 import Web3
 import ipfshttpclient
 
-import model.model_utils as model_utils
+import utils.model_utils as model_utils
 import keras
-import threading
 
 w3 = Web3(Web3.HTTPProvider('HTTP://127.0.0.1:7545'))
 
@@ -37,7 +36,7 @@ X_test, y_test = model_utils.load_data(f"{directory}/local_data.pkl")
 
 def initiate_task():
     print('Initiating task')
-    model = model_utils.initialize_model()
+    model = model_utils.initialize_simple_model()
     model.save(f'{directory}/global_model.keras')
    
     # Add the file to IPFS
@@ -78,8 +77,8 @@ def open_registration():
     w3.eth.wait_for_transaction_receipt(tx_hash)
     print('Registration opened for participants')
 
-    second = 0
-    while second < 20:
+    second = 25
+    while second > 0:
         participant_enrolled_filter = contract.events.ParticipantEnrolled.create_filter(fromBlock="latest")
         print('Waiting for participants to enroll')
         for event in participant_enrolled_filter.get_all_entries():
@@ -87,7 +86,7 @@ def open_registration():
             if event['event'] == "ParticipantEnrolled":
                 print('Participant enrolled', event['args']['participant'])
         time.sleep(1)
-        second += 1
+        second -= 1
 
 
 def close_registration():

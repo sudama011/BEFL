@@ -8,3 +8,5 @@ matplotlib
 web3
 ipfshttpclient
 phe
+tensorflow-privacy==0.7.3
+hyperopt
