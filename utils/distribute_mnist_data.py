@@ -55,7 +55,10 @@ def distribute_data():
         data_splits[i] = (X_splits[indices], y_splits[indices])
 
     for i, (X_split, y_split) in enumerate(data_splits):
-        with open(f'{directory}/local_data_{i}.pkl', 'wb') as f:
+        directory = f'contributor{i+1}'
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        with open(f'{directory}/local_data.pkl', 'wb') as f:
             pickle.dump((X_split, y_split), f)
 
 if __name__ == '__main__':

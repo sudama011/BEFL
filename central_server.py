@@ -17,8 +17,8 @@ contract_address = None
 
 contract_abi = None
 
-if(os.path.exists('build/contracts/FederatedLearning.json')):
-    with open('build/contracts/FederatedLearning.json', 'r') as f:
+if(os.path.exists('contracts/FederatedLearning.json')):
+    with open('contracts/FederatedLearning.json', 'r') as f:
         contract_abi = json.load(f)
         contract_address = contract_abi["networks"]["5777"]["address"]
         contract_abi = contract_abi["abi"]
@@ -80,13 +80,11 @@ def open_registration():
     second = 25
     while second > 0:
         participant_enrolled_filter = contract.events.ParticipantEnrolled.create_filter(fromBlock="latest")
-        print('Waiting for participants to enroll')
         for event in participant_enrolled_filter.get_all_entries():
-            # print(event)
             if event['event'] == "ParticipantEnrolled":
                 print('Participant enrolled', event['args']['participant'])
-        time.sleep(1)
-        second -= 1
+        time.sleep(3)
+        second -= 3
 
 
 def close_registration():
@@ -111,7 +109,7 @@ if __name__ == '__main__':
         close_registration()
         start_training()
 
-        epoch = 5
+        epoch = 10
         current_block = w3.eth.block_number
 
         while epoch > 0:

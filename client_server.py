@@ -24,8 +24,8 @@ contract_address = None
 contract_abi = None
 
 # Load the contract ABI and address
-if(os.path.exists('build/contracts/FederatedLearning.json')):
-    with open('build/contracts/FederatedLearning.json', 'r') as f:
+if(os.path.exists('contracts/FederatedLearning.json')):
+    with open('contracts/FederatedLearning.json', 'r') as f:
         contract_abi = json.load(f)
         contract_address = contract_abi["networks"]["5777"]["address"]
         contract_abi = contract_abi["abi"]
