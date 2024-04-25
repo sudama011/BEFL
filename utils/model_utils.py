@@ -15,8 +15,8 @@ def load_data(filepath='local_data1.pkl'):
 def ewc_loss(star_vars, lambd):
     def loss(y_true, y_pred):
         c = []
-        for v in range(len(model.trainable_variables)):
-            c.append(K.sum(K.square(model.trainable_variables[v] - star_vars[v])))
+        for v in range(len(model.trainable_weights)):
+            c.append(K.sum(K.square(model.trainable_weights[v] - K.constant(star_vars[v]))))
         return K.categorical_crossentropy(y_true, y_pred) + lambd * K.sum(c)
     return loss
 
@@ -32,17 +32,17 @@ def initialize_model(star_vars=None, lambd=4000):  # lambd is the EWC regulariza
     model.compile(optimizer='adam', loss=ewc_loss(star_vars, lambd) if star_vars is not None else 'categorical_crossentropy')
     return model
 
-def initialize_simple_model():
+def initialize_simple_model(star_vars=None, lambd=4000):
     model = keras.models.Sequential([
         keras.layers.Input(shape=(28, 28, 1)),
         keras.layers.Flatten(),
         keras.layers.Dense(128, activation='relu'),
         keras.layers.Dense(10, activation='softmax')
     ])
-    model.compile(optimizer='adam', loss='categorical_crossentropy')
+    model.compile(optimizer='adam', loss=ewc_loss(star_vars, lambd) if star_vars is not None else 'categorical_crossentropy')
     return model
 
-def train_model(model, X_train, y_train,epochs=5, batch_size=16):
+def train_model(model, X_train, y_train, epochs=5, batch_size=16):
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     history = model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size)
     return model, history
@@ -72,7 +72,7 @@ def evaluate_model(model, X_test, y_test):
     loss, accuracy = model.evaluate(X_test, y_test)
     return loss, accuracy
 
-def aggregate_models(models, batch_size=16):
+def aggregate_models(models, star_vars, lambd=4000, batch_size=16):
     weights = [model.get_weights() for model in models]
     average_weights = []
 
@@ -86,69 +86,41 @@ def aggregate_models(models, batch_size=16):
 
     aggregated_model = keras.models.clone_model(models[0])
     aggregated_model.set_weights(average_weights)
+
+    # Apply EWC loss
+    aggregated_model.compile(optimizer='adam', loss=ewc_loss(star_vars, lambd), metrics=['accuracy'])
+
     return aggregated_model
 
-
 if __name__ == '__main__':
-    (X_train, y_train), (X_test, y_test) = keras.datasets.mnist.load_data()
-    X_train = X_train.reshape(-1, 28, 28, 1).astype('float32') / 255
-    X_test = X_test.reshape(-1, 28, 28, 1).astype('float32') / 255
-    y_train = keras.utils.to_categorical(y_train, num_classes=10)
-    y_test = keras.utils.to_categorical(y_test, num_classes=10)
 
-    label_sets = [
-        {1,3,4,7},
-        {0,5,6,8},
-        {1,2,4,9},
-        {0,2,3,5},
-        {6,7,8,9}
-    ]
+    X_test, y_test = load_data('server_data/local_data.pkl')
 
-    data_splits = [[] for _ in range(len(label_sets))]
+    data_splits = []
+    for i in range(1, 6):
+        X_train, y_train = load_data(f'contributor{i}/local_data.pkl')
+        data_splits.append((X_train, y_train))
 
-    for label in range(10):
-        label_indices = np.where(np.argmax(y_train, axis=-1) == label)[0].astype(int)
-    
-        first_match = True
-        half = len(label_indices) // 2
-        
-        for i, label_set in enumerate(label_sets):
-            if label in label_set:
-                if first_match:
-                    # first time we match a label in the set, use the first half of the data
-                    X_split, y_split = X_train[label_indices[:half]], y_train[label_indices[:half]]
-                    first_match = False
-                else:
-                    # second time we match a label in the set, use the second half of the data
-                    X_split, y_split = X_train[label_indices[half:]], y_train[label_indices[half:]]
-                data_splits[i].append((X_split, y_split))
-
-    for i, split in enumerate(data_splits):
-        X_splits, y_splits = zip(*split)
-        X_splits = np.concatenate(X_splits)
-        y_splits = np.concatenate(y_splits)
-        # shuffle the data
-        indices = np.arange(len(X_splits))
-        np.random.shuffle(indices)
-        data_splits[i] = (X_splits[indices], y_splits[indices])
-
-
-    global_model = initialize_simple_model()
+    global_model = initialize_model()
 
     all_histories = [[] for _ in range(len(data_splits))]
     global_model_history = []
-    no_of_communication_rounds = 5
+    no_of_communication_rounds = 10
+
     for round in range(no_of_communication_rounds):
         print(f'Starting round {round+1}...')
         models = []
         for i, (X_split, y_split) in enumerate(data_splits):
+            # this code is run on each client server
             model = keras.models.clone_model(global_model)
             model.set_weights(global_model.get_weights())
             m, history = train_model(model, X_split, y_split, epochs=1,batch_size=32)
             models.append(m)
             all_histories[i].append(history)
-
-        global_model = aggregate_models(models)    
+        if round == 0:
+            star_vars = [var.numpy() for var in global_model.weights]
+        # then central server aggregates the models
+        global_model = aggregate_models(models, star_vars, lambd=4000, batch_size=32) 
         loss, accuracy = evaluate_model(global_model, X_test, y_test)
         global_model_history.append((loss, accuracy))
 
