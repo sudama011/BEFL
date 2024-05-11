@@ -1,3 +1,7 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+import tensorflow as tf
 import keras
 from keras import backend as K
 import numpy as np
@@ -6,6 +10,7 @@ import pickle
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
+print(tf.config.list_physical_devices('GPU'))
 
 def load_data(filepath='local_data1.pkl'):
     with open(filepath, 'rb') as f:
@@ -19,6 +24,10 @@ def ewc_loss(star_vars, lambd):
             c.append(K.sum(K.square(model.trainable_weights[v] - K.constant(star_vars[v]))))
         return K.categorical_crossentropy(y_true, y_pred) + lambd * K.sum(c)
     return loss
+
+def add_noise(data, epsilon):
+    noise = np.random.laplace(0, 1/epsilon, size=data.shape)
+    return data + noise
 
 def initialize_model(star_vars=None, lambd=4000):  # lambd is the EWC regularization strength
     model = keras.models.Sequential([
@@ -72,7 +81,7 @@ def evaluate_model(model, X_test, y_test):
     loss, accuracy = model.evaluate(X_test, y_test)
     return loss, accuracy
 
-def aggregate_models(models, star_vars, lambd=4000, batch_size=16):
+def aggregate_models(models, star_vars = None, lambd=4000, batch_size=16):
     weights = [model.get_weights() for model in models]
     average_weights = []
 
@@ -88,7 +97,7 @@ def aggregate_models(models, star_vars, lambd=4000, batch_size=16):
     aggregated_model.set_weights(average_weights)
 
     # Apply EWC loss
-    aggregated_model.compile(optimizer='adam', loss=ewc_loss(star_vars, lambd), metrics=['accuracy'])
+    aggregated_model.compile(optimizer='adam', loss=ewc_loss(star_vars, lambd) if star_vars is not None else 'categorical_crossentropy')
 
     return aggregated_model
 
@@ -99,13 +108,14 @@ if __name__ == '__main__':
     data_splits = []
     for i in range(1, 6):
         X_train, y_train = load_data(f'contributor{i}/local_data.pkl')
+        X_train = add_noise(X_train, 1.5)
         data_splits.append((X_train, y_train))
 
-    global_model = initialize_model()
+    global_model = initialize_simple_model()
 
     all_histories = [[] for _ in range(len(data_splits))]
     global_model_history = []
-    no_of_communication_rounds = 10
+    no_of_communication_rounds = 5
 
     for round in range(no_of_communication_rounds):
         print(f'Starting round {round+1}...')

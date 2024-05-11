@@ -77,7 +77,7 @@ def open_registration():
     w3.eth.wait_for_transaction_receipt(tx_hash)
     print('Registration opened for participants')
 
-    second = 25
+    second = 30
     while second > 0:
         participant_enrolled_filter = contract.events.ParticipantEnrolled.create_filter(fromBlock="latest")
         for event in participant_enrolled_filter.get_all_entries():
